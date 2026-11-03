@@ -84,6 +84,7 @@ def test_get_X_numpy_datetime_resolution(unit):
 def get_expected_polynomial_coefs(y, degree, with_intercept=True):
     """Compute expected coefficients from polynomial regression."""
     t_ix = _get_X_numpy_int_from_pandas(y.index).reshape(-1)
+    t_ix = t_ix - t_ix[0]
     poly_matrix = np.vander(t_ix, degree + 1)
     if not with_intercept:
         poly_matrix = poly_matrix[:, :-1]
@@ -107,7 +108,6 @@ def _test_trend(degree, with_intercept):
     np.testing.assert_allclose(actual, expected, rtol=1e-5)
 
 
-@pytest.mark.xfail(reason="known bug, needs to be investigated, see #11495")
 @pytest.mark.skipif(
     not run_test_for_class([PolynomialTrendForecaster, _get_X_numpy_int_from_pandas]),
     reason="run test only if softdeps are present and incrementally (if requested)",
@@ -117,6 +117,27 @@ def _test_trend(degree, with_intercept):
 def test_trend(degree, with_intercept):
     """Test PolynomialTrendForecaster coefficients."""
     _test_trend(degree, with_intercept)
+
+
+@pytest.mark.skipif(
+    not run_test_for_class([PolynomialTrendForecaster, _get_X_numpy_int_from_pandas]),
+    reason="run test only if softdeps are present and incrementally (if requested)",
+)
+@pytest.mark.parametrize("degree", [1, 2, 3])
+def test_polynomial_trend_exact_future_forecasts(degree):
+    """Test exact polynomial forecasts on a recent daily date index."""
+    train_index = pd.date_range("2024-01-01", periods=20, freq="D")
+    future_index = pd.date_range(train_index[-1] + pd.Timedelta(days=1), periods=5, freq="D")
+    train_time = np.arange(len(train_index))
+    future_time = np.arange(len(train_index), len(train_index) + len(future_index))
+    coefficients = np.arange(1, degree + 2)
+    y = pd.Series(np.polynomial.polynomial.polyval(train_time, coefficients), index=train_index)
+    expected = np.polynomial.polynomial.polyval(future_time, coefficients)
+
+    forecaster = PolynomialTrendForecaster(degree=degree)
+    actual = forecaster.fit(y).predict(ForecastingHorizon(future_index, is_relative=False))
+
+    np.testing.assert_allclose(actual.to_numpy().reshape(-1), expected)
 
 
 # zero trend does not work without intercept

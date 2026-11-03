@@ -10,10 +10,13 @@ import pandas as pd
 from sklearn.base import clone
 from sklearn.linear_model import LinearRegression
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures
+from sklearn.preprocessing import FunctionTransformer, PolynomialFeatures
 
 from sktime.forecasting.base import BaseForecaster
-from sktime.forecasting.trend._util import _get_X_numpy_int_from_pandas
+from sktime.forecasting.trend._util import (
+    _get_X_numpy_int_from_pandas,
+    _shift_time,
+)
 
 
 class PolynomialTrendForecaster(BaseForecaster):
@@ -70,6 +73,7 @@ class PolynomialTrendForecaster(BaseForecaster):
     regressor_ : sklearn regressor estimator object
         The fitted regressor object.
         This is a fitted ``sklearn`` pipeline with steps
+        ``FunctionTransformer(_shift_time)``,
         ``PolynomialFeatures(degree, with_intercept)``,
         followed by a clone of ``regressor``.
 
@@ -139,16 +143,17 @@ class PolynomialTrendForecaster(BaseForecaster):
         else:
             regressor = clone(self.regressor)
 
+        X_sklearn = _get_X_numpy_int_from_pandas(y.index)
+
         # make pipeline with polynomial features
         self.regressor_ = make_pipeline(
+            FunctionTransformer(
+                func=_shift_time,
+                kw_args={"first_time": X_sklearn[0, 0]},
+            ),
             PolynomialFeatures(degree=self.degree, include_bias=self.with_intercept),
             regressor,
         )
-
-        # we regress index on series values
-        # the sklearn X is obtained from the index of y
-        # the sklearn y can be taken as the y seen here
-        X_sklearn = _get_X_numpy_int_from_pandas(y.index)
 
         # fit regressor
         self.regressor_.fit(X_sklearn, y.iloc[:, 0])
@@ -196,6 +201,8 @@ class PolynomialTrendForecaster(BaseForecaster):
 
         # 1. get X (design matrix) and M = (X^t X)^-1
         t_train = _get_X_numpy_int_from_pandas(self.train_index_).flatten()
+        first_time = t_train[0]
+        t_train = _shift_time(t_train, first_time)
         X = np.polynomial.polynomial.polyvander(t_train, self.degree)
         if not self.with_intercept:
             X = X[:, 1:]  # remove the column of 1's that handles the intercept
@@ -208,7 +215,7 @@ class PolynomialTrendForecaster(BaseForecaster):
 
         t_fh = fh.to_pandas()
         fh_periods = _get_X_numpy_int_from_pandas(t_fh)
-        t = np.array(fh_periods)
+        t = _shift_time(np.array(fh_periods), first_time)
 
         # 3. calculate (half-) range of PI (1 + sqrt(x_0^t M x_0)) (up to scaling)
         start = 0 if self.with_intercept else 1
