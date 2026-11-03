@@ -15,3 +15,8 @@ def _get_X_numpy_int_from_pandas(x):
     else:
         x = x.astype("int64")
     return x.to_numpy().reshape(-1, 1)
+
+
+def _shift_time(x, first_time):
+    """Shift time values to start at zero."""
+    return x - first_time
